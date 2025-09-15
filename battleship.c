@@ -1,39 +1,60 @@
 #include <stdio.h>
 #include <stdbool.h>
-void initialization()
-{
-        // empty for now
+void initialization(){}
+void teardown(){}
+void acceptInput(char *letter, int *number) {
+	char buffer[100];
+	bool valid = false;
+	do {
+		printf("Please enter a letter {A-J}");
+		if (fgets(buffer, sizeof(buffer), stdin) == NULL) {
+			continue;
+		}
+		char c = buffer[0];
+		if (c >= 'a' && c <= 'z') {
+			c = c - 'a' + 'A';
+		}
+		if (c >= 'A' && c <= 'J') {
+			*letter = c;
+			valid = true;
+		} else {
+			printf("Error: Letter must between A and J.\n");
+			valid = false;
+		}
+	} while (!valid);
+	valid = false;
+	do {
+		printf("Please enter a number {0-9}");
+		if (fgets(buffer, sizeof(buffer), stdin) == NULL) {
+			continue;
+		}
+		int i;
+		if ((sscanf(buffer, "%d", &i) == 1) && (i >= 0 && i <= 9)) {
+			*number = i;
+			valid = true;
+		} else {
+			printf("Please enter a number between 0 and 9\n");
+			valid = false;
+		}
+	} while (!valid);
 }
-void teardown()
-{
-        // empty for now
+char* updateWorldState(char letter, int number) {
+	return (number % 2 == 0) ? "Hit!" : "Miss!";
 }
-void acceptInput()
-{
-        printf("Please enter a letter {A-J}");
-        fgets(*letter, 1, stdin);
-        printf("Please enter a number {0-9}");
-        scanf("%d", &number);
+void displayWorldState(char* result) {
+	printf("%s\n", result);
 }
-void updateWorldState(char letter, int number)
-{
-        (number % 2 == 0) ? printf("Hit!") : printf("Miss!");
-        // TODO add return (?)
-}
-void displayWorldState()
-{
-        // TODO Print result calculated in updateWorldState()
-        return 0;
-}
-int main()
-{
-        // TODO "loop until flag is set"
-        initialization();
-        while() {
-                acceptInput();
-                updateWorldState();
-                displayWorldState();
-        }
-        teardown();
-        return 0;
+int main() {
+	char letter;
+	int number;
+	bool isRunning = true;
+	char* result;
+	initialization();
+	while(isRunning) {
+		acceptInput(&letter, &number);
+		result = updateWorldState(letter, number);
+		displayWorldState(result);		
+	}
+	teardown();
+	return 0;
 }
