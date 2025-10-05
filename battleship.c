@@ -11,19 +11,8 @@ bool acceptInput(char *letter, int *number);
 char* updateWorldState(char letter, int number);
 void displayWorldState(char* result);
 
-typedef enum {
-    NO_SHIP,
-    CARRIER,
-    BATTLESHIP,
-    CRUISER,
-    SUBMARINE,
-    DESTROYER
-} ShipType;
-typedef enum {
-    HIT,
-    MISS,
-    UNTRIED
-} ShotStatus;
+typedef enum { NO_SHIP, CARRIER, BATTLESHIP, CRUISER, SUBMARINE, DESTROYER } ShipType;
+typedef enum { HIT, MISS, UNTRIED } ShotStatus;
 
 ShipType** playerGrid; // Pointer for 2D array grid of placed ships
 ShotStatus** shotGrid; // Pointer for 2D array grid of shots
@@ -193,16 +182,52 @@ void displayPlayerGrid() {
 }
 void initialization(){
     playerGrid = malloc(GRID_SIZE * sizeof(ShipType*));
+    // Check / handle malloc failure
+    if (!playerGrid) {
+        printf("ERROR: Memory allocation failed for playerGrid.\n");
+        exit(EXIT_FAILURE);
+    }
     for (int i = 0; i < GRID_SIZE; i++) {
         playerGrid[i] = malloc(GRID_SIZE * sizeof(ShipType));
+        // Check / handle malloc failure
+        if (!playerGrid[i]) {
+            printf("ERROR: Memory allocation failed for playerGrid.\n");
+            // free already allocated rows
+            for (int k = 0; k < i; k++) {
+                free(playerGrid[k]);
+            }
+            free(playerGrid);
+            exit(EXIT_FAILURE);
+        }
         // Initialize grid to all no ships
         for (int j = 0; j < GRID_SIZE; j++) {
             playerGrid[i][j] = NO_SHIP;
         }
     }
     shotGrid = malloc(GRID_SIZE * sizeof(ShotStatus*));
+    // Check / handle malloc failure
+    if (!shotGrid) {
+        printf("ERROR: Memory allocation failed for shotGrid.\n");
+        for (int i = 0; i < GRID_SIZE; i++) {
+            free(playerGrid[i]);
+        }
+        free(playerGrid);
+        exit(EXIT_FAILURE);
+    }
     for (int i = 0; i < GRID_SIZE; i++) {
         shotGrid[i] = malloc(GRID_SIZE * sizeof(ShotStatus));
+        if (!shotGrid[i]) {
+            printf("ERROR: Memory allocation failed for shotGrid row.\n");
+            for (int k = 0; k < i; k++) {
+                free(shotGrid[k]);
+            }
+            free(shotGrid);
+            for (int k = 0; k < GRID_SIZE; k++) {
+                free(playerGrid[k]);
+            }
+            free(playerGrid);
+            exit(EXIT_FAILURE);
+        }
         // Initialize grid to all untried spots
         for (int j = 0; j < GRID_SIZE; j++) {
             shotGrid[i][j] = UNTRIED;
@@ -218,7 +243,7 @@ void teardown(){
     }
     free(playerGrid);
     free(shotGrid);
-    printf("Game Over");
+    printf("Game Quit");
 }
 bool acceptInput(char *letter, int *number) {
 	char buffer[100];
@@ -267,7 +292,6 @@ char* updateWorldState(char letter, int number) {
 }
 void displayWorldState(char* result) { 
     printf("%s\n", result);
-    
 }
 int main() {
 	char letter;
