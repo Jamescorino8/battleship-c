@@ -5,22 +5,37 @@
 #include <string.h>
 
 typedef struct { int row; int col; } Coordinates; // Struct for passing coordinates
-typedef enum { NO_SHIP, DESTROYED, CARRIER, BATTLESHIP, CRUISER, SUBMARINE, DESTROYER } ShipType;
-typedef enum { HIT, MISS, UNTRIED } ShotStatus;
+typedef enum { NO_SHIP, DESTROYED, CARRIER, BATTLESHIP, CRUISER, SUBMARINE, DESTROYER } ShipType; // enum for ship types
+typedef enum { HIT, MISS, UNTRIED } ShotStatus; // enum for 
 
-ShipType** playerGrid; // Pointer for 2D array grid of placed ships
-ShotStatus** shotGrid; // Pointer for 2D array grid of shots
-ShipType** playerGridCPU;
-ShotStatus** shotGridCPU;
+ShipType** playerGrid; // Pointer for user's 2D array grid of placed ships
+ShotStatus** shotGrid; // Pointer for user's 2D array grid of shots 
+ShipType** playerGridCPU; // Pointer for Single Player CPU's 2D array grid of placed ships
+ShotStatus** shotGridCPU; // Pointer for Single Player CPU's 2D array grid of shots 
 const int GRID_SIZE = 10;
 
-// Forward declarations for functions used before their definitions
-void placeSinglePlayerShips(void);
-void displayPlayerGrid(void);
-void displayShotGrid(void);
+// Forward declarations
+void singlePlayerResponse(Coordinates shot, const char* result);
+Coordinates getSinglePlayerShot();
+char* makeSinglePlayerShot(char letter, int col);
+void setupSinglePlayer();
+void placeSinglePlayerShips();
+void teardownSinglePlayer();
+bool isValidInput(char* input, int shipLength);
+void placeShip(char* input, ShipType type);
+void shipPlacement();
+void displayPlayerGrid(); 
+void displayShotGrid(); 
+void initialization(); 
+void teardown(); 
+bool acceptInput(char *letter, int *number); 
+bool checkWin(ShipType** grid); 
+char* updateWorldState(char letter, int number, char** cpuShotResult); 
+void displayWorldState(char* playerShotResult); 
 
+// ----- Begin Single Player CPU Implementation -----
 void singlePlayerResponse(Coordinates shot, const char* result) {
-    if (strcmp(result, "Hit!") == 0) {
+    if (result == "Hit!") {
         shotGridCPU[shot.row][shot.col] = HIT;
     } else {
         shotGridCPU[shot.row][shot.col] = MISS;
@@ -110,8 +125,8 @@ void setupSinglePlayer() {
     placeSinglePlayerShips();
 }
 void placeSinglePlayerShips() {
-    srand(time(0)); // Seed random number generator
-    ShipType ships[] = {CARRIER, BATTLESHIP, CRUISER, SUBMARINE, DESTROYER};
+    srand(time(0));
+    ShipType ships[] = { CARRIER, BATTLESHIP, CRUISER, SUBMARINE, DESTROYER };
     int shipLengths[] = {5, 4, 3, 2, 1};
     int numShips = 5;
 
@@ -175,6 +190,8 @@ void teardownSinglePlayer() {
     free(playerGridCPU);
     free(shotGridCPU);
 }
+
+// ----- Start Main User Implementations -----
 bool isValidInput(char* input, int shipLength) {
     char startRowChar = 0, endRowChar = 0;
     int startCol = -1, endCol = -1, startRowInt = -1, endRowInt = -1;
@@ -283,43 +300,31 @@ void placeShip(char* input, ShipType type) {
         }
     }
 }
+
 void shipPlacement() {
     char buffer[10000];
-    printf("Place your ships:\n");   
+    char* currentShip;
+    ShipType ships[] = { CARRIER, BATTLESHIP, CRUISER, SUBMARINE, DESTROYER };
+    int shipLengths[] = { 5, 4, 3, 2, 1 };
+    int numShips = 5;
+    bool isValidPlacement = false;
+
+    printf("Place your ships:\n");
     displayPlayerGrid(); 
-    // Carrier
-    while (1) {
-        printf("Please enter a location for your Carrier (size 5), ex: C37 or CG4: ");
-        if (!fgets(buffer, sizeof(buffer), stdin)) return; 
-        if (isValidInput(buffer, 5)) { placeShip(buffer, CARRIER); break; }
-    }
-    displayPlayerGrid(); 
-    // Battleship
-    while (1) {
-        printf("Please enter a location for your Battleship (size 4), ex: C36 or CF4: ");
-        if (!fgets(buffer, sizeof(buffer), stdin)) return;
-        if (isValidInput(buffer, 4)) { placeShip(buffer, BATTLESHIP); break; }
-    }
-    displayPlayerGrid(); 
-    // Cruiser
-    while (1) {
-        printf("Please enter a location for your Cruiser (size 3), ex: C35 or CE4: ");
-        if (!fgets(buffer, sizeof(buffer), stdin)) return;
-        if (isValidInput(buffer, 3)) { placeShip(buffer, CRUISER); break; }
-    }
-    displayPlayerGrid(); 
-    // Submarine
-    while (1) {
-        printf("Please enter a location for your Submarine (size 2), ex: C34 or CD4: ");
-        if (!fgets(buffer, sizeof(buffer), stdin)) return;
-        if (isValidInput(buffer, 2)) { placeShip(buffer, SUBMARINE); break; }
-    }
-    displayPlayerGrid(); 
-    // Destroyer
-    while (1) {
-        printf("Please enter a location for your Destroyer (size 1), ex: C33 or CC3: ");
-        if (!fgets(buffer, sizeof(buffer), stdin)) return;
-        if (isValidInput(buffer, 1)) { placeShip(buffer, DESTROYER); break; }
+    for (int i = 0; i < numShips; i++) {
+        switch (ships[i]) {
+            case DESTROYER: currentShip = "Destroyer"; break;
+            case SUBMARINE: currentShip = "Submarine"; break;
+            case CRUISER: currentShip = "Cruiser"; break;
+            case BATTLESHIP: currentShip = "Battleship"; break;
+            case CARRIER: currentShip = "Carrier"; break;
+        }
+        while (!isValidPlacement) {
+            printf("Please enter a location for your %s (size %d), ex: C3%d or C%c3: ", currentShip, shipLengths[i], (7 - i), ('G' - i));
+            if (!fgets(buffer, sizeof(buffer), stdin)) return;
+            if (isValidInput(buffer, shipLengths[i])) { placeShip(buffer, ships[i]); break; }
+        }
+        displayPlayerGrid(); 
     }
     printf("All ships have been placed:\n");
 }
@@ -341,7 +346,6 @@ void displayPlayerGrid() {
         printf("\n");
     }
 }
-
 void displayShotGrid() {
     printf("  0 1 2 3 4 5 6 7 8 9\n");
     for (int i = 0; i < GRID_SIZE; i++) {
