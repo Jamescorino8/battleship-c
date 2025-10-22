@@ -1,22 +1,10 @@
 #include <stdio.h>
 #include <stdbool.h>
 #include <stdlib.h>
+#include <time.h>
 #include <string.h>
 
-void singlePlayerResponse(char* result);
-char* getSinglePlayerShot();
-char* makeSinglePlayerShot(char letter, int number);
-void teardownSinglePlayer();
-void setupSinglePlayer();
-bool isValidInput(char* input, int shipLength);
-void displayPlayerGrid();
-void shipPlacement();
-void initialization();
-void teardown();
-bool acceptInput(char *letter, int *number);
-char* updateWorldState(char letter, int number);
-void displayWorldState(char* result);
-
+typedef struct { int row; int col; } Coordinates; // Struct for passing coordinates
 typedef enum { NO_SHIP, DESTROYED, CARRIER, BATTLESHIP, CRUISER, SUBMARINE, DESTROYER } ShipType;
 typedef enum { HIT, MISS, UNTRIED } ShotStatus;
 
@@ -26,30 +14,43 @@ ShipType** playerGridCPU;
 ShotStatus** shotGridCPU;
 const int GRID_SIZE = 10;
 
-void singlePlayerResponse(char* result) {
-    if (result == "Hit!") ; // ?
+// Forward declarations for functions used before their definitions
+void placeSinglePlayerShips(void);
+void displayPlayerGrid(void);
+void displayShotGrid(void);
+
+void singlePlayerResponse(Coordinates shot, const char* result) {
+    if (strcmp(result, "Hit!") == 0) {
+        shotGridCPU[shot.row][shot.col] = HIT;
+    } else {
+        shotGridCPU[shot.row][shot.col] = MISS;
+    }
 }
-char* getSinglePlayerShot() {
+Coordinates getSinglePlayerShot() {
     srand(time(0));
     bool isValid = false;
     int row, col;
+    Coordinates shot;
     while (!isValid) {
         row = rand() % 10;
         col = rand() % 10;
         if (shotGridCPU[row][col] == UNTRIED) {
             isValid = true;
+            shot.row = row;
+            shot.col = col;
         }
     }
-    char result[2];
-    sprintf(result[0], "%d", row);
-    sprintf(result[1], "%d", col);
-    return result;
+    return shot;
 }
-char* makeSinglePlayerShot(char letter, int number) {
+char* makeSinglePlayerShot(char letter, int col) {
+    int row = letter - 'A';
     bool isHit = false;
-    if (playerGridCPU[atoi(letter)][number] != NO_SHIP) {
+    if (playerGridCPU[row][col] != NO_SHIP) {
         isHit = true;
-        playerGridCPU[atoi(letter)][number] = DESTROYED;
+        shotGrid[row][col] = HIT;
+        playerGridCPU[row][col] = DESTROYED;
+    } else {
+        shotGrid[row][col] = MISS;
     }
     return isHit ? "Hit!" : "Miss!"; 
 }
@@ -77,9 +78,9 @@ void setupSinglePlayer() {
             playerGridCPU[i][j] = NO_SHIP;
         }
     }
-    shotGrid = malloc(GRID_SIZE * sizeof(ShotStatus*));
+    shotGridCPU = malloc(GRID_SIZE * sizeof(ShotStatus*));
     // Check / handle malloc failure
-    if (!shotGrid) {
+    if (!shotGridCPU) {
         printf("ERROR: Memory allocation failed for shotGridCPU.\n");
         for (int i = 0; i < GRID_SIZE; i++) {
             free(playerGridCPU[i]);
@@ -88,68 +89,80 @@ void setupSinglePlayer() {
         exit(EXIT_FAILURE);
     }
     for (int i = 0; i < GRID_SIZE; i++) {
-        shotGrid[i] = malloc(GRID_SIZE * sizeof(ShotStatus));
-        if (!shotGrid[i]) {
+        shotGridCPU[i] = malloc(GRID_SIZE * sizeof(ShotStatus));
+        if (!shotGridCPU[i]) {
             printf("ERROR: Memory allocation failed for shotGridCPU row.\n");
             for (int k = 0; k < i; k++) {
-                free(shotGrid[k]);
+                free(shotGridCPU[k]);
             }
-            free(shotGrid);
+            free(shotGridCPU);
             for (int k = 0; k < GRID_SIZE; k++) {
-                free(playerGrid[k]);
+                free(playerGridCPU[k]);
             }
-            free(playerGrid);
+            free(playerGridCPU);
             exit(EXIT_FAILURE);
         }
         // Initialize grid to all untried spots
         for (int j = 0; j < GRID_SIZE; j++) {
-            shotGrid[i][j] = UNTRIED;
+            shotGridCPU[i][j] = UNTRIED;
         }
     }
-    srand(time(0));
-    char startRow = -1, endRow = -1;
-    int startCol = -1, endCol = -1;
-    bool isAcross = false, validPlacement = false;
-    ShipType type = NO_SHIP;
-    // Decrementing for loop
-    for (int shipLength = 5; shipLength > 0; shipLength--) {
-        validPlacement = false;
-        isAcross = rand() % 2 == 1 ? true : false; // flip a coin to decide if placement will be down or across.
-        // set type of ship depending on size.
-        switch (shipLength) { 
-            case 5: type = CARRIER; break;
-            case 4: type = BATTLESHIP; break;
-            case 3: type = CRUISER; break;
-            case 2: type = SUBMARINE; break;
-            case 1: type = DESTROYER; break;
-        }
-        if (isAcross) {
-            while (!validPlacement) {
-                startRow = rand() % 10;
-                startCol = rand() % 10;
-                endCol = startCol + shipLength;
-                // check if valid placement
-                if (endCol < 10) validPlacement = true;
-                for (int c = startCol; c <= endCol; c++) {
-                    if (playerGridCPU[startRow][c] == NO_SHIP) validPlacement = true;
+    placeSinglePlayerShips();
+}
+void placeSinglePlayerShips() {
+    srand(time(0)); // Seed random number generator
+    ShipType ships[] = {CARRIER, BATTLESHIP, CRUISER, SUBMARINE, DESTROYER};
+    int shipLengths[] = {5, 4, 3, 2, 1};
+    int numShips = 5;
+
+    for (int i = 0; i < numShips; i++) {
+        ShipType type = ships[i];
+        int shipLength = shipLengths[i];
+        bool validPlacement = false;
+
+        while (!validPlacement) {
+            int isAcross = rand() % 2; // 0 for vertical, 1 for horizontal
+            int startRow = rand() % GRID_SIZE;
+            int startCol = rand() % GRID_SIZE;
+
+            if (isAcross) {
+                // Check if ship fits horizontally
+                if (startCol + shipLength > GRID_SIZE) continue; 
+
+                // Check for overlaps
+                bool overlaps = false;
+                for (int c = startCol; c < startCol + shipLength; c++) {
+                    if (playerGridCPU[startRow][c] != NO_SHIP) {
+                        overlaps = true;
+                        break;
+                    }
                 }
-            }
-            for (int c = startCol; c <= endCol; ++c) {
-                playerGridCPU[startRow][c] = type;
-            }
-        } else {
-            while (!validPlacement) {
-                startCol = rand() % 10;
-                startRow = rand() % 10;
-                endRow = startRow + shipLength;
-                // check if valid placement
-                if (endRow < 10) validPlacement = true;
-                for (int r = startRow; r <= endRow; r++) {
-                    if (playerGridCPU[r][startCol] == NO_SHIP) validPlacement = true;
+                if (overlaps) continue; // Try new random spot
+
+                // Place ship
+                for (int c = startCol; c < startCol + shipLength; c++) {
+                    playerGridCPU[startRow][c] = type;
                 }
-            }
-            for (int r = startRow; r <= endRow; ++r) {
-                playerGridCPU[r][startCol] = type;
+                validPlacement = true;
+            } else {
+                // Check if ship fits vertically
+                if (startRow + shipLength > GRID_SIZE) continue;
+
+                // Check for overlaps
+                bool overlaps = false;
+                for (int r = startRow; r < startRow + shipLength; r++) {
+                    if (playerGridCPU[r][startCol] != NO_SHIP) {
+                        overlaps = true;
+                        break;
+                    }
+                }
+                if (overlaps) continue; // Try new random spot
+
+                // Place ship
+                for (int r = startRow; r < startRow + shipLength; r++) {
+                    playerGridCPU[r][startCol] = type;
+                }
+                validPlacement = true;
             }
         }
     }
@@ -322,6 +335,22 @@ void displayPlayerGrid() {
                 case CRUISER:    printf("R "); break;
                 case SUBMARINE:  printf("S "); break;
                 case DESTROYER:  printf("D "); break;
+                case DESTROYED:  printf("X "); break;
+            }
+        }
+        printf("\n");
+    }
+}
+
+void displayShotGrid() {
+    printf("  0 1 2 3 4 5 6 7 8 9\n");
+    for (int i = 0; i < GRID_SIZE; i++) {
+        printf("%c ", 'A' + i);
+        for (int j = 0; j < GRID_SIZE; j++) {
+            switch (shotGrid[i][j]) {
+                case HIT:     printf("H "); break;
+                case MISS:    printf("M "); break;
+                case UNTRIED: printf(". "); break;
             }
         }
         printf("\n");
@@ -392,7 +421,6 @@ void teardown() {
     free(playerGrid);
     free(shotGrid);
     teardownSinglePlayer();
-    printf("Game Quit");
 }
 bool acceptInput(char *letter, int *number) {
 	char buffer[100];
@@ -436,31 +464,63 @@ bool acceptInput(char *letter, int *number) {
 	} while (!isValid);
     return true; // return false if game continues
 }
-char* updateWorldState(char letter, int number) { 
-    char* result = makeSinglePlayerShot(letter, number);
-    if (result == "Hit!") shotGrid[atoi(letter)][number] = HIT;
-    else shotGrid[atoi(letter)][number] = MISS;
-
-    singlePlayerResponse(getSinglePlayerShot());
-
-    return result;
+bool checkWin(ShipType** grid) {
+    for (int i = 0; i < GRID_SIZE; i++) {
+        for (int j = 0; j < GRID_SIZE; j++) {
+            // If any spot is a ship (and not destroyed), the game is not over
+            if (grid[i][j] != NO_SHIP && grid[i][j] != DESTROYED) {
+                return false; 
+            }
+        }
+    }
+    return true; // All ship parts are DESTROYED
 }
-void displayWorldState(char* result) { 
-    printf("%s\n", result);
+char* updateWorldState(char letter, int number, char** cpuShotResult) { 
+    char* playerShotResult = makeSinglePlayerShot(letter, number);
+    Coordinates cpuShot = getSinglePlayerShot();
+    char cpuShotRowChar = cpuShot.row + 'A';
+    if (playerGrid[cpuShot.row][cpuShot.col] != NO_SHIP && playerGrid[cpuShot.row][cpuShot.col] != DESTROYED) {
+        playerGrid[cpuShot.row][cpuShot.col] = DESTROYED;
+        *cpuShotResult = "Hit!";
+        printf("The computer fired at %c%d and it was a Hit!\n", cpuShotRowChar, cpuShot.col);
+    } else {
+        *cpuShotResult = "Miss!";
+        printf("The computer fired at %c%d and it was a Miss!\n", cpuShotRowChar, cpuShot.col);
+    }
+    singlePlayerResponse(cpuShot, *cpuShotResult);
+    return playerShotResult;
+}
+void displayWorldState(char* playerShotResult) { 
+    printf("\nYour shot was a %s\n", playerShotResult);
+    
+    printf("\n=== YOUR SHOTS (H=Hit, M=Miss) ===\n");
+    displayShotGrid();
+    
+    printf("\n=== YOUR SHIPS (X=Hit) ===\n");
+    displayPlayerGrid();
+    printf("\n");
 }
 int main() {
 	char letter;
 	int number;
     bool isRunning = true;
-	char* result;
+	char* playerShotResult;
+    char* cpuShotResult;
 	initialization();
 	while(isRunning) {
         if (!acceptInput(&letter, &number)) {
             isRunning = false;
             continue;
         }
-		result = updateWorldState(letter, number);
-		displayWorldState(result);
+		playerShotResult = updateWorldState(letter, number, &cpuShotResult);
+        displayWorldState(playerShotResult);
+        if (checkWin(playerGridCPU)) {
+            printf("YOU WIN! You sank all enemy ships!\n");
+            isRunning = false;
+        } else if (checkWin(playerGrid)) {
+            printf("YOU LOSE! The computer sank all your ships!\n");
+            isRunning = false;
+        }
 	}
 	teardown();
 }
