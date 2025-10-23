@@ -4,9 +4,9 @@
 #include <time.h>
 #include <string.h>
 
-typedef struct { int row; int col; } Coordinates; // Struct for passing coordinates
-typedef enum { NO_SHIP, DESTROYED, CARRIER, BATTLESHIP, CRUISER, SUBMARINE, DESTROYER } ShipType; // enum for ship types
-typedef enum { HIT, MISS, UNTRIED } ShotStatus; // enum for 
+typedef struct { int row; int col; } Coordinates; // Struct for passing coordinates between functions
+typedef enum { NO_SHIP, DESTROYED, CARRIER, BATTLESHIP, CRUISER, SUBMARINE, DESTROYER } ShipType;
+typedef enum { HIT, MISS, UNTRIED } ShotStatus;
 
 ShipType** playerGrid; // Pointer for user's 2D array grid of placed ships
 ShotStatus** shotGrid; // Pointer for user's 2D array grid of shots 
@@ -24,14 +24,14 @@ void teardownSinglePlayer();
 bool isValidInput(char* input, int shipLength);
 void placeShip(char* input, ShipType type);
 void shipPlacement();
-void displayPlayerGrid(); 
-void displayShotGrid(); 
-void initialization(); 
-void teardown(); 
-bool acceptInput(char *letter, int *number); 
-bool checkWin(ShipType** grid); 
-char* updateWorldState(char letter, int number, char** cpuShotResult); 
-void displayWorldState(char* playerShotResult); 
+void displayPlayerGrid();    
+void displayShotGrid();      
+void initialization();
+void teardown();
+bool acceptInput(char *letter, int *number);
+bool checkWin(ShipType** grid);
+char* updateWorldState(char letter, int number, char** cpuShotResult);
+void displayWorldState(char* playerShotResult);
 
 // ----- Begin Single Player CPU Implementation -----
 void singlePlayerResponse(Coordinates shot, const char* result) {
@@ -190,7 +190,6 @@ void teardownSinglePlayer() {
     free(playerGridCPU);
     free(shotGridCPU);
 }
-
 // ----- Start Main User Implementations -----
 bool isValidInput(char* input, int shipLength) {
     char startRowChar = 0, endRowChar = 0;
@@ -208,7 +207,11 @@ bool isValidInput(char* input, int shipLength) {
         return false;
     }
 
-    // Convert rows from char to int
+    // Normalize to uppercase so inputs like "c37" or "cG4" are accepted
+    if (startRowChar >= 'a' && startRowChar <= 'z') startRowChar -= ('a' - 'A');
+    if (endRowChar   >= 'a' && endRowChar   <= 'z') endRowChar   -= ('a' - 'A');
+
+    // Convert rows from char to int (A->0 .. J->9)
     startRowInt = startRowChar - 'A';
     endRowInt = endRowChar - 'A';
 
@@ -427,46 +430,61 @@ void teardown() {
     teardownSinglePlayer();
 }
 bool acceptInput(char *letter, int *number) {
-	char buffer[100];
-	bool isValid = false;
-	do {
-		printf("Please enter a letter {A-J}, or quit game with {Q}:");
-		if (fgets(buffer, sizeof(buffer), stdin) == NULL) {
-			continue; // if fgets returns NULL, skip loop and reprompt
-		}
-		char c = buffer[0];
-        // force convert char input to uppercase
-		if (c >= 'a' && c <= 'z') {
-			c = c - 'a' + 'A';
-		}
-        if (c == 'Q') {
-            return false; // return false if user quit
+    // Prompt until the user provides a untried coordinate.
+    // Returns false if user chooses to quit with 'Q'.
+    char buffer[100];
+    while (1) {
+        // 1) Get a valid letter A-J (accept lowercase by normalizing)
+        bool isValid = false;
+        do {
+            printf("Please enter a letter {A-J}, or quit game with {Q}:");
+            if (fgets(buffer, sizeof(buffer), stdin) == NULL) {
+                continue; // if fgets returns NULL, skip loop and reprompt
+            }
+            char c = buffer[0];
+            if (c >= 'a' && c <= 'z') {
+                c = c - 'a' + 'A'; // normalize to uppercase
+            }
+            if (c == 'Q') {
+                return false; // user quit
+            }
+            if (c >= 'A' && c <= 'J') {
+                *letter = c;
+                isValid = true;
+            } else {
+                printf("Error: Letter must be between A and J.\n");
+                isValid = false;
+            }
+        } while (!isValid);
+
+        // 2) Get a valid number 0-9
+        isValid = false;
+        do {
+            printf("Please enter a number {0-9}:");
+            if (fgets(buffer, sizeof(buffer), stdin) == NULL) {
+                continue;
+            }
+            int i;
+            if ((sscanf(buffer, "%d", &i) == 1) && (i >= 0 && i <= 9)) {
+                *number = i;
+                isValid = true;
+            } else {
+                printf("Please enter a number between 0 and 9\n");
+                isValid = false;
+            }
+        } while (!isValid);
+
+        // 3) Reject coordinates previously targeted; re-prompt both fields
+        int row = *letter - 'A';
+        int col = *number;
+        if (shotGrid[row][col] != UNTRIED) {
+            printf("You already fired at %c%d. Pick a different target.\n", *letter, *number);
+            continue; // restart prompts
         }
-		if (c >= 'A' && c <= 'J') {
-			*letter = c;
-			isValid = true;
-		} else {
-			printf("Error: Letter must be between A and J.\n");
-			isValid = false;
-		}
-	} while (!isValid);
-	isValid = false;
-	do {
-		printf("Please enter a number {0-9}:");
-		if (fgets(buffer, sizeof(buffer), stdin) == NULL) {
-			continue;
-		}
-		int i;
-		// Check if the input is a valid integer between 0 and 9 
-		if ((sscanf(buffer, "%d", &i) == 1) && (i >= 0 && i <= 9)) {
-			*number = i;
-			isValid = true;
-		} else {
-			printf("Please enter a number between 0 and 9\n");
-			isValid = false;
-		}
-	} while (!isValid);
-    return true; // return false if game continues
+
+        // Fresh target
+        return true;
+    }
 }
 bool checkWin(ShipType** grid) {
     for (int i = 0; i < GRID_SIZE; i++) {
@@ -497,10 +515,10 @@ char* updateWorldState(char letter, int number, char** cpuShotResult) {
 void displayWorldState(char* playerShotResult) { 
     printf("\nYour shot was a %s\n", playerShotResult);
     
-    printf("\n=== YOUR SHOTS (H=Hit, M=Miss) ===\n");
+    printf("\nYOUR SHOTS (H=Hit, M=Miss)\n");
     displayShotGrid();
     
-    printf("\n=== YOUR SHIPS (X=Hit) ===\n");
+    printf("\nYOUR SHIPS (X=Hit)\n");
     displayPlayerGrid();
     printf("\n");
 }
