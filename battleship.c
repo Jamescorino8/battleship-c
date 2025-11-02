@@ -1,8 +1,17 @@
+#define _POSIX_C_SOURCE 200112L
 #include <stdio.h>
 #include <stdbool.h>
 #include <stdlib.h>
 #include <time.h>
 #include <string.h>
+#include <unistd.h>
+#include <sys/types.h>
+#include <sys/socket.h>
+#include <netinet/in.h>
+#include <arpa/inet.h>
+#include <netdb.h>
+
+#define BACKLOG 1
 
 typedef struct { int row; int col; } Coordinates; // Struct for passing coordinates between functions
 typedef enum { NO_SHIP, DESTROYED, CARRIER, BATTLESHIP, CRUISER, SUBMARINE, DESTROYER } ShipType;
@@ -12,15 +21,17 @@ ShipType** playerGrid; // Pointer for user's 2D array grid of placed ships
 ShotStatus** shotGrid; // Pointer for user's 2D array grid of shots 
 ShipType** playerGridCPU; // Pointer for Single Player CPU's 2D array grid of placed ships
 ShotStatus** shotGridCPU; // Pointer for Single Player CPU's 2D array grid of shots 
+
 const int GRID_SIZE = 10;
+int sockfd, new_fd;
+bool isServer = false;
 
 // Forward declarations
-void singlePlayerResponse(Coordinates shot, const char* result);
-Coordinates getSinglePlayerShot();
-char* makeSinglePlayerShot(char letter, int col);
-void setupSinglePlayer();
-void placeSinglePlayerShips();
-void teardownSinglePlayer();
+void twoPlayerResponse(Coordinates shot, const char* result);
+Coordinates getTwoPlayerShot();
+char* makeTwoPlayerShot(char letter, int col);
+void setupTwoPlayer();
+void teardownTwoPlayer();
 bool isValidInput(char* input, int shipLength);
 void placeShip(char* input, ShipType type);
 void shipPlacement();
@@ -30,8 +41,11 @@ void initialization();
 void teardown();
 bool acceptInput(char *letter, int *number);
 bool checkWin(ShipType** grid);
+bool checkTwoPlayerWin();
 char* updateWorldState(char letter, int number, char** cpuShotResult);
 void displayWorldState(char* playerShotResult);
+// Single player helpers
+void placeSinglePlayerShips(void);
 
 // ----- Begin Single Player CPU Implementation -----
 void singlePlayerResponse(Coordinates shot, const char* result) {
@@ -43,7 +57,6 @@ void singlePlayerResponse(Coordinates shot, const char* result) {
     }
 }
 Coordinates getSinglePlayerShot() {
-    
     bool isValid = false;
     int row, col;
     Coordinates shot;
@@ -145,7 +158,6 @@ void placeSinglePlayerShips() {
             if (isAcross) {
                 // Check if ship fits horizontally
                 if (startCol + shipLength > GRID_SIZE) continue; 
-
                 // Check for overlaps
                 bool overlaps = false;
                 for (int c = startCol; c < startCol + shipLength; c++) {
@@ -155,7 +167,6 @@ void placeSinglePlayerShips() {
                     }
                 }
                 if (overlaps) continue; // Try new random spot
-
                 // Place ship
                 for (int c = startCol; c < startCol + shipLength; c++) {
                     playerGridCPU[startRow][c] = type;
@@ -174,7 +185,6 @@ void placeSinglePlayerShips() {
                     }
                 }
                 if (overlaps) continue; // Try new random spot
-
                 // Place ship
                 for (int r = startRow; r < startRow + shipLength; r++) {
                     playerGridCPU[r][startCol] = type;
@@ -191,6 +201,67 @@ void teardownSinglePlayer() {
     }
     free(playerGridCPU);
     free(shotGridCPU);
+}
+// ----- Begin Two Player Implementation -----
+void setupTwoPlayer() {
+    printf("Waiting for opponent connection...\n");
+    if (isServer) {
+        struct sockaddr_storage their_addr;
+        socklen_t sin_size = sizeof their_addr;
+        new_fd = accept(sockfd, (struct sockaddr *)&their_addr, &sin_size);
+        printf("Opponent connected!\n");
+    } else {
+        new_fd = sockfd; // client already connected
+    }
+}
+
+void teardownTwoPlayer() {
+    close(new_fd);
+    if (isServer) close(sockfd);
+}
+
+Coordinates getTwoPlayerShot() {
+    char buf[10];
+    int n = recv(new_fd, buf, sizeof(buf) - 1, 0);
+    buf[n] = '\0';
+    Coordinates shot;
+    shot.row = buf[0] - 'A';
+    shot.col = atoi(buf + 1);
+    return shot;
+}
+
+char* makeTwoPlayerShot(char letter, int col) {
+    char msg[10];
+    snprintf(msg, sizeof(msg), "%c%d", letter, col);
+    send(new_fd, msg, strlen(msg), 0);
+    char response[10];
+    int n = recv(new_fd, response, sizeof(response) - 1, 0);
+    if (n > 0) {
+        response[n] = '\0';
+        // Update our shot grid based on response
+        int row = letter - 'A';
+        if (strcmp(response, "Hit!") == 0) {
+            shotGrid[row][col] = HIT;
+        } else {
+            shotGrid[row][col] = MISS;
+        }
+        // strdup is POSIX; to avoid implicit declaration warnings across environments, do a manual copy
+        char* copy = (char*)malloc((size_t)n + 1);
+        if (!copy) {
+            return "Error";
+        }
+        memcpy(copy, response, (size_t)n + 1);
+        return copy;
+    }
+    return "Error";
+}
+
+void twoPlayerResponse(Coordinates shot, const char* result) {
+    send(new_fd, result, strlen(result), 0);
+    // Update our grid when we're hit
+    if (strcmp(result, "Hit!") == 0 && playerGrid[shot.row][shot.col] != NO_SHIP) {
+        playerGrid[shot.row][shot.col] = DESTROYED;
+    }
 }
 // ----- Start Main User Implementations -----
 bool isValidInput(char* input, int shipLength) {
@@ -307,7 +378,6 @@ void placeShip(char* input, ShipType type) {
         }
     }
 }
-
 void shipPlacement() {
     char buffer[10000];
     char* currentShip;
@@ -488,8 +558,6 @@ bool acceptInput(char *letter, int *number) {
             printf("You already fired at %c%d. Pick a different target.\n", *letter, *number);
             continue; // restart prompts
         }
-
-        // Fresh target
         return true;
     }
 }
@@ -504,6 +572,18 @@ bool checkWin(ShipType** grid) {
         }
     }
     return true; // All ship parts are DESTROYED
+}
+bool checkTwoPlayerWin() {
+    // In two-player mode, count total hits to see if we've sunk all 5 ships (5+4+3+2+1 = 15 cells)
+    int hitCount = 0;
+    for (int i = 0; i < GRID_SIZE; i++) {
+        for (int j = 0; j < GRID_SIZE; j++) {
+            if (shotGrid[i][j] == HIT) {
+                hitCount++;
+            }
+        }
+    }
+    return hitCount >= 15; // All enemy ships destroyed (carrier=5 + battleship=4 + cruiser=3 + submarine=2 + destroyer=1)
 }
 char* updateWorldState(char letter, int number, char** cpuShotResult) { 
     // Resolve player's shot on CPU, then CPU takes a random shot at player; update both shot grids
@@ -531,27 +611,146 @@ void displayWorldState(char* playerShotResult) {
     displayPlayerGrid();
     printf("\n");
 }
-int main() {
+int main(int argc, char *argv[]) {
 	char letter;
 	int number;
     bool isRunning = true;
 	char* playerShotResult;
     char* cpuShotResult;
-	initialization();
-	while(isRunning) {
-        if (!acceptInput(&letter, &number)) {
-            isRunning = false;
-            continue;
+    if (argc == 2) { // server mode: one parameter = port
+        int yes=1, rv;
+        const char* port = argv[1];
+        struct addrinfo hints, *servinfo, *p;
+
+        memset(&hints, 0, sizeof hints);
+        hints.ai_family = AF_UNSPEC;
+        hints.ai_socktype = SOCK_STREAM;
+        hints.ai_flags = AI_PASSIVE;
+
+        rv = getaddrinfo(NULL, port, &hints, &servinfo); // get local address
+
+        for (p = servinfo; p != NULL; p = p->ai_next) {
+            // create socket
+            if ((sockfd = socket(p->ai_family, p->ai_socktype, p->ai_protocol)) == -1) {
+                continue;
+            }
+            // bind to address
+            if (bind(sockfd, p->ai_addr, p->ai_addrlen) == -1) { close(sockfd); continue; }
+            break;
         }
-		playerShotResult = updateWorldState(letter, number, &cpuShotResult);
-        displayWorldState(playerShotResult);
-        if (checkWin(playerGridCPU)) {
-            printf("YOU WIN! You sank all enemy ships!\n");
-            isRunning = false;
-        } else if (checkWin(playerGrid)) {
-            printf("YOU LOSE! The computer sank all your ships!\n");
-            isRunning = false;
+        freeaddrinfo(servinfo);
+        // listen for connections
+        if (listen(sockfd, BACKLOG) == -1) {
+            perror("listen");
+            exit(1);
         }
-	}
-	teardown();
+        printf("Server listening on port %s...\n", port);
+
+        isServer = true;
+        setupTwoPlayer();
+        initialization();
+        bool myTurn = true;
+        char* result;
+        while (1) {
+            if (myTurn) {
+                printf("\n=== YOUR TURN ===\n");
+                displayShotGrid();
+                if (!acceptInput(&letter, &number)) break;
+                result = makeTwoPlayerShot(letter, number);
+                printf("You fired at %c%d and it was a %s\n", letter, number, result);
+                free(result); // Free the allocated memory
+                if (checkTwoPlayerWin()) {
+                    printf("YOU WIN! You sank all enemy ships!\n");
+                    break;
+                }
+            } else {
+                printf("\n=== OPPONENT'S TURN ===\n");
+                Coordinates shot = getTwoPlayerShot();
+                printf("Opponent fired at %c%d\n", 'A' + shot.row, shot.col);
+                // Check if it's a hit on our grid
+                bool isHit = (playerGrid[shot.row][shot.col] != NO_SHIP && 
+                             playerGrid[shot.row][shot.col] != DESTROYED);
+                result = isHit ? "Hit!" : "Miss!";
+                twoPlayerResponse(shot, result);
+                printf("Result: %s\n", result);
+                displayPlayerGrid();
+                if (checkWin(playerGrid)) {
+                    printf("YOU LOSE! The opponent sank all your ships!\n");
+                    break;
+                }
+            }
+            myTurn = !myTurn;
+        }
+        teardownTwoPlayer();
+    } else if (argc == 3) { // client mode: first param = IP, second = port
+        int rv;
+        struct addrinfo hints, *servinfo, *p;
+        memset(&hints, 0, sizeof hints);
+        hints.ai_family = AF_UNSPEC;
+        hints.ai_socktype = SOCK_STREAM;
+
+        // get destination info
+        rv = getaddrinfo(argv[1], argv[2], &hints, &servinfo);
+
+        // try to connect
+        for(p = servinfo; p != NULL; p = p->ai_next) {
+            if ((sockfd = socket(p->ai_family, p->ai_socktype, p->ai_protocol)) == -1) continue;
+            if (connect(sockfd, p->ai_addr, p->ai_addrlen) == -1) { close(sockfd); continue; }
+            break;
+        }
+        
+        printf("Connected to server!\n");
+        freeaddrinfo(servinfo);
+
+        setupTwoPlayer();
+        initialization();
+        bool myTurn = false;
+        char* result;
+        while (1) {
+            if (myTurn) {
+                printf("\n=== YOUR TURN ===\n");
+                displayShotGrid();
+                if (!acceptInput(&letter, &number)) break;
+                result = makeTwoPlayerShot(letter, number);
+                printf("You fired at %c%d and it was a %s\n", letter, number, result);
+                free(result); // Free the allocated memory
+                if (checkTwoPlayerWin()) {
+                    printf("YOU WIN! You sank all enemy ships!\n");
+                    break;
+                }
+            } else {
+                printf("\n=== OPPONENT'S TURN ===\n");
+                Coordinates shot = getTwoPlayerShot();
+                printf("Opponent fired at %c%d\n", 'A' + shot.row, shot.col);
+                // Check if it's a hit on our grid
+                bool isHit = (playerGrid[shot.row][shot.col] != NO_SHIP && 
+                             playerGrid[shot.row][shot.col] != DESTROYED);
+                result = isHit ? "Hit!" : "Miss!";
+                twoPlayerResponse(shot, result);
+                printf("Result: %s\n", result);
+                displayPlayerGrid();
+                if (checkWin(playerGrid)) {
+                    printf("YOU LOSE! The opponent sank all your ships!\n");
+                    break;
+                }
+            }
+            myTurn = !myTurn;
+        }
+        teardownTwoPlayer();
+    } else { // singleplayer mode: no parameters
+        initialization();
+        while(isRunning) {
+            if (!acceptInput(&letter, &number)) { isRunning = false; continue; }
+            playerShotResult = updateWorldState(letter, number, &cpuShotResult);
+            displayWorldState(playerShotResult);
+            if (checkWin(playerGridCPU)) {
+                printf("YOU WIN! You sank all enemy ships!\n");
+                isRunning = false;
+            } else if (checkWin(playerGrid)) {
+                printf("YOU LOSE! The computer sank all your ships!\n");
+                isRunning = false;
+            }
+        }
+        teardown();
+    }
 }
