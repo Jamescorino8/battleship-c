@@ -44,7 +44,6 @@ bool checkWin(ShipType** grid);
 bool checkTwoPlayerWin();
 char* updateWorldState(char letter, int number, char** cpuShotResult);
 void displayWorldState(char* playerShotResult);
-// Single player helpers
 void placeSinglePlayerShips(void);
 
 // ----- Begin Single Player CPU Implementation -----
@@ -234,26 +233,31 @@ char* makeTwoPlayerShot(char letter, int col) {
     char msg[10];
     snprintf(msg, sizeof(msg), "%c%d", letter, col);
     send(new_fd, msg, strlen(msg), 0);
+
     char response[10];
     int n = recv(new_fd, response, sizeof(response) - 1, 0);
-    if (n > 0) {
-        response[n] = '\0';
-        // Update our shot grid based on response
-        int row = letter - 'A';
-        if (strcmp(response, "Hit!") == 0) {
-            shotGrid[row][col] = HIT;
-        } else {
-            shotGrid[row][col] = MISS;
-        }
-        // strdup is POSIX; to avoid implicit declaration warnings across environments, do a manual copy
-        char* copy = (char*)malloc((size_t)n + 1);
-        if (!copy) {
-            return "Error";
-        }
-        memcpy(copy, response, (size_t)n + 1);
-        return copy;
+    if (n <= 0) {
+        // Connection closed or error; caller will see NULL and handle it
+        return NULL;
     }
-    return "Error";
+
+    response[n] = '\0';
+
+    // Update shot grid based on response
+    int row = letter - 'A';
+    if (strcmp(response, "Hit!") == 0) {
+        shotGrid[row][col] = HIT;
+    } else {
+        shotGrid[row][col] = MISS;
+    }
+
+    char *copy = malloc((size_t)n + 1);
+    if (!copy) {
+        // Allocation failed; caller will see NULL and handle it
+        return NULL;
+    }
+    memcpy(copy, response, (size_t)n + 1);
+    return copy;
 }
 
 void twoPlayerResponse(Coordinates shot, const char* result) {
@@ -265,7 +269,7 @@ void twoPlayerResponse(Coordinates shot, const char* result) {
 }
 // ----- Start Main User Implementations -----
 bool isValidInput(char* input, int shipLength) {
-    // Accepts formats: "C37" (across C3-C7) or "CG4" (down C4-G4). Validates bounds, length, and overlap.
+    // Accepts formats "C37" or "CG4". Validates bounds, length, and overlaps
     char startRowChar = 0, endRowChar = 0;
     int startCol = -1, endCol = -1, startRowInt = -1, endRowInt = -1;
     bool isAcross = false;
@@ -281,11 +285,11 @@ bool isValidInput(char* input, int shipLength) {
         return false;
     }
 
-    // Normalize to uppercase so inputs like "c37" or "cG4" are accepted
+    // convert to uppercase so inputs like "c37" or "cG4" are accepted
     if (startRowChar >= 'a' && startRowChar <= 'z') startRowChar -= ('a' - 'A');
     if (endRowChar   >= 'a' && endRowChar   <= 'z') endRowChar   -= ('a' - 'A');
 
-    // Convert rows from char to int (A->0 .. J->9)
+    // Convert rows from char to int
     startRowInt = startRowChar - 'A';
     endRowInt = endRowChar - 'A';
 
@@ -345,7 +349,7 @@ bool isValidInput(char* input, int shipLength) {
 }
 // Assumes input was already validated
 void placeShip(char* input, ShipType type) {
-    // Parses orientation and fills playerGrid accordingly. Duplicate sscanf branch retained for robustness.
+    // Parse orientation and fill playerGrid
     char startRowChar = 0, endRowChar = 0;
     int startCol = -1, endCol = -1;
     bool isAcross = false;
@@ -511,7 +515,7 @@ bool acceptInput(char *letter, int *number) {
     // Returns false if user chooses to quit with 'Q'.
     char buffer[100];
     while (1) {
-        // 1) Get a valid letter A-J (accept lowercase by normalizing)
+        // Get a valid letter A-J (accepts lowercase)
         bool isValid = false;
         do {
             printf("Please enter a letter {A-J}, or quit game with {Q}:");
@@ -534,7 +538,7 @@ bool acceptInput(char *letter, int *number) {
             }
         } while (!isValid);
 
-        // 2) Get a valid number 0-9
+        // Get a valid number 0-9
         isValid = false;
         do {
             printf("Please enter a number {0-9}:");
@@ -551,7 +555,7 @@ bool acceptInput(char *letter, int *number) {
             }
         } while (!isValid);
 
-        // 3) Reject coordinates previously targeted; re-prompt both fields
+        // Reject coordinates if previously used; re-prompt
         int row = *letter - 'A';
         int col = *number;
         if (shotGrid[row][col] != UNTRIED) {
@@ -574,7 +578,7 @@ bool checkWin(ShipType** grid) {
     return true; // All ship parts are DESTROYED
 }
 bool checkTwoPlayerWin() {
-    // In two-player mode, count total hits to see if we've sunk all 5 ships (5+4+3+2+1 = 15 cells)
+    // In two-player mode, count total hits to see if we've sunk all 5 ships (15 hits total)
     int hitCount = 0;
     for (int i = 0; i < GRID_SIZE; i++) {
         for (int j = 0; j < GRID_SIZE; j++) {
@@ -617,7 +621,7 @@ int main(int argc, char *argv[]) {
     bool isRunning = true;
 	char* playerShotResult;
     char* cpuShotResult;
-    if (argc == 2) { // server mode: one parameter = port
+    if (argc == 2) { // server mode: one parameter
         int yes=1, rv;
         const char* port = argv[1];
         struct addrinfo hints, *servinfo, *p;
@@ -657,8 +661,10 @@ int main(int argc, char *argv[]) {
                 displayShotGrid();
                 if (!acceptInput(&letter, &number)) break;
                 result = makeTwoPlayerShot(letter, number);
-                printf("You fired at %c%d and it was a %s\n", letter, number, result);
-                free(result); // Free the allocated memory
+                printf("You fired at %c%d and it was a %s\n", letter, number, result ? result : "Error");
+                if (result) {
+                    free(result);
+                }
                 if (checkTwoPlayerWin()) {
                     printf("YOU WIN! You sank all enemy ships!\n");
                     break;
@@ -682,6 +688,7 @@ int main(int argc, char *argv[]) {
             myTurn = !myTurn;
         }
         teardownTwoPlayer();
+        teardown();
     } else if (argc == 3) { // client mode: first param = IP, second = port
         int rv;
         struct addrinfo hints, *servinfo, *p;
@@ -712,8 +719,10 @@ int main(int argc, char *argv[]) {
                 displayShotGrid();
                 if (!acceptInput(&letter, &number)) break;
                 result = makeTwoPlayerShot(letter, number);
-                printf("You fired at %c%d and it was a %s\n", letter, number, result);
-                free(result); // Free the allocated memory
+                printf("You fired at %c%d and it was a %s\n", letter, number, result ? result : "Error");
+                if (result) {
+                    free(result); // Free the allocated memory
+                }
                 if (checkTwoPlayerWin()) {
                     printf("YOU WIN! You sank all enemy ships!\n");
                     break;
@@ -737,6 +746,7 @@ int main(int argc, char *argv[]) {
             myTurn = !myTurn;
         }
         teardownTwoPlayer();
+        teardown();
     } else { // singleplayer mode: no parameters
         initialization();
         while(isRunning) {
