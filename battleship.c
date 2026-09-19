@@ -221,9 +221,15 @@ void teardownTwoPlayer() {
 
 Coordinates getTwoPlayerShot() {
     char buf[10];
-    int n = recv(new_fd, buf, sizeof(buf) - 1, 0);
-    buf[n] = '\0';
     Coordinates shot;
+    int n = recv(new_fd, buf, sizeof(buf) - 1, 0);
+    if (n <= 0) {
+        // Connection closed or error; signal with an off-board coordinate
+        shot.row = -1;
+        shot.col = -1;
+        return shot;
+    }
+    buf[n] = '\0';
     shot.row = buf[0] - 'A';
     shot.col = atoi(buf + 1);
     return shot;
@@ -632,15 +638,28 @@ int main(int argc, char *argv[]) {
         hints.ai_flags = AI_PASSIVE;
 
         rv = getaddrinfo(NULL, port, &hints, &servinfo); // get local address
+        if (rv != 0) {
+            fprintf(stderr, "getaddrinfo: %s\n", gai_strerror(rv));
+            exit(1);
+        }
 
         for (p = servinfo; p != NULL; p = p->ai_next) {
             // create socket
             if ((sockfd = socket(p->ai_family, p->ai_socktype, p->ai_protocol)) == -1) {
                 continue;
             }
+            // allow the port to be reused immediately after a game ends
+            if (setsockopt(sockfd, SOL_SOCKET, SO_REUSEADDR, &yes, sizeof yes) == -1) {
+                perror("setsockopt");
+            }
             // bind to address
             if (bind(sockfd, p->ai_addr, p->ai_addrlen) == -1) { close(sockfd); continue; }
             break;
+        }
+        if (p == NULL) {
+            fprintf(stderr, "Failed to bind to port %s\n", port);
+            freeaddrinfo(servinfo);
+            exit(1);
         }
         freeaddrinfo(servinfo);
         // listen for connections
@@ -672,6 +691,10 @@ int main(int argc, char *argv[]) {
             } else {
                 printf("\n=== OPPONENT'S TURN ===\n");
                 Coordinates shot = getTwoPlayerShot();
+                if (shot.row < 0) {
+                    printf("Opponent disconnected.\n");
+                    break;
+                }
                 printf("Opponent fired at %c%d\n", 'A' + shot.row, shot.col);
                 // Check if it's a hit on our grid
                 bool isHit = (playerGrid[shot.row][shot.col] != NO_SHIP && 
@@ -698,6 +721,10 @@ int main(int argc, char *argv[]) {
 
         // get destination info
         rv = getaddrinfo(argv[1], argv[2], &hints, &servinfo);
+        if (rv != 0) {
+            fprintf(stderr, "getaddrinfo: %s\n", gai_strerror(rv));
+            exit(1);
+        }
 
         // try to connect
         for(p = servinfo; p != NULL; p = p->ai_next) {
@@ -705,7 +732,12 @@ int main(int argc, char *argv[]) {
             if (connect(sockfd, p->ai_addr, p->ai_addrlen) == -1) { close(sockfd); continue; }
             break;
         }
-        
+        if (p == NULL) {
+            fprintf(stderr, "Failed to connect to %s:%s\n", argv[1], argv[2]);
+            freeaddrinfo(servinfo);
+            exit(1);
+        }
+
         printf("Connected to server!\n");
         freeaddrinfo(servinfo);
 
@@ -730,6 +762,10 @@ int main(int argc, char *argv[]) {
             } else {
                 printf("\n=== OPPONENT'S TURN ===\n");
                 Coordinates shot = getTwoPlayerShot();
+                if (shot.row < 0) {
+                    printf("Opponent disconnected.\n");
+                    break;
+                }
                 printf("Opponent fired at %c%d\n", 'A' + shot.row, shot.col);
                 // Check if it's a hit on our grid
                 bool isHit = (playerGrid[shot.row][shot.col] != NO_SHIP && 
